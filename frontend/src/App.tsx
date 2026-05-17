@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react"
-import { emails } from "./data/emails"
 
 type Email = {
   id: number
@@ -10,17 +9,16 @@ type Email = {
   category: string
   priority: string
   unread: boolean
-  aiSummary: string
-  suggestedReply: string
+  ai_summary: string
+  suggested_reply: string
 }
 
 function App() {
-  const [selectedCategory, setSelectedCategory] = useState("Inbox")
+  const [emails, setEmails] = useState<Email[]>([])
+  const [selectedEmail, setSelectedEmail] = useState<Email | null>(null)
+  const [selectedMailbox, setSelectedMailbox] = useState("Inbox")
   const [search, setSearch] = useState("")
-  const [allEmails, setAllEmails] = useState<Email[]>(emails)
-  const [selectedEmail, setSelectedEmail] = useState<Email>(emails[0])
   const [showCompose, setShowCompose] = useState(false)
-  const [loading, setLoading] = useState(false)
 
   const [newEmail, setNewEmail] = useState({
     sender: "",
@@ -28,80 +26,80 @@ function App() {
     preview: "",
   })
 
-  const categories = ["Inbox", "Important", "AI Priority", "Spam", "Sent"]
+  const mailboxes = ["Inbox", "Important", "Spam", "Sent"]
 
-  const getCount = (category: string) => {
-    if (category === "Sent") {
-      return allEmails.filter((email) => email.category === "Sent").length
+  useEffect(() => {
+    fetchEmails()
+  }, [])
+
+  const fetchEmails = async () => {
+    try {
+      const response = await fetch("http://127.0.0.1:8000/emails")
+      const data = await response.json()
+
+      setEmails(data)
+
+      if (data.length > 0) {
+        setSelectedEmail(data[0])
+      }
+    } catch (error) {
+      console.error(error)
     }
-
-    return allEmails.filter(
-      (email) => email.category === category && email.unread
-    ).length
   }
 
-  const filteredEmails = allEmails.filter((email) => {
-    const matchesCategory = email.category === selectedCategory
+  const getMailbox = (email: Email) => {
+    if (email.category === "Sent") return "Sent"
+    if (email.category === "Spam") return "Spam"
+    if (email.priority === "High") return "Important"
+    return "Inbox"
+  }
+
+  const getMailboxCount = (mailbox: string) => {
+    return emails.filter((email) => getMailbox(email) === mailbox).length
+  }
+
+  const sendEmail = async () => {
+    if (!newEmail.sender || !newEmail.subject || !newEmail.preview) {
+      return
+    }
+
+    try {
+      const response = await fetch("http://127.0.0.1:8000/emails/sent", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(newEmail),
+      })
+
+      const createdEmail = await response.json()
+
+      setEmails([createdEmail, ...emails])
+      setSelectedMailbox("Sent")
+      setSelectedEmail(createdEmail)
+
+      setShowCompose(false)
+
+      setNewEmail({
+        sender: "",
+        subject: "",
+        preview: "",
+      })
+    } catch (error) {
+      console.error(error)
+    }
+  }
+
+  const filteredEmails = emails.filter((email) => {
+    const matchesMailbox = getMailbox(email) === selectedMailbox
 
     const matchesSearch =
       email.sender.toLowerCase().includes(search.toLowerCase()) ||
       email.subject.toLowerCase().includes(search.toLowerCase()) ||
       email.preview.toLowerCase().includes(search.toLowerCase())
 
-    return matchesCategory && matchesSearch
+    return matchesMailbox && matchesSearch
   })
-
-  useEffect(() => {
-    if (selectedEmail && selectedEmail.category !== "Sent") {
-      setAllEmails((prevEmails) =>
-        prevEmails.map((email) =>
-          email.id === selectedEmail.id ? { ...email, unread: false } : email
-        )
-      )
-    }
-  }, [selectedEmail])
-
-  const analyzeEmail = async () => {
-    setLoading(true)
-
-    try {
-      const response = await fetch("http://127.0.0.1:8000/analyze-email", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          subject: selectedEmail.subject,
-          message: selectedEmail.preview,
-        }),
-      })
-
-      const data = await response.json()
-
-      const updatedEmail = {
-        ...selectedEmail,
-        category: data.category,
-        priority: data.priority,
-        aiSummary: data.summary,
-        suggestedReply: data.suggested_reply,
-      }
-
-      setSelectedEmail(updatedEmail)
-
-      setAllEmails((prevEmails) =>
-        prevEmails.map((email) =>
-          email.id === selectedEmail.id ? updatedEmail : email
-        )
-      )
-
-      setSelectedCategory(data.category)
-    } catch (error) {
-      console.error("AI analysis failed:", error)
-      alert("Backend is not running. Start FastAPI first.")
-    } finally {
-      setLoading(false)
-    }
-  }
 
   return (
     <div className="h-screen bg-zinc-950 text-white flex">
@@ -116,14 +114,14 @@ function App() {
         </button>
 
         <nav className="space-y-4">
-          {categories.map((category) => (
+          {mailboxes.map((mailbox) => (
             <button
-              key={category}
+              key={mailbox}
               onClick={() => {
-                setSelectedCategory(category)
+                setSelectedMailbox(mailbox)
 
-                const firstEmail = allEmails.find(
-                  (email) => email.category === category
+                const firstEmail = emails.find(
+                  (email) => getMailbox(email) === mailbox
                 )
 
                 if (firstEmail) {
@@ -131,15 +129,13 @@ function App() {
                 }
               }}
               className={`w-full flex justify-between items-center px-4 py-3 rounded-xl transition ${
-                selectedCategory === category
-                  ? "bg-blue-600 hover:bg-blue-500"
-                  : "hover:bg-zinc-800"
+                selectedMailbox === mailbox ? "bg-blue-600" : "hover:bg-zinc-800"
               }`}
             >
-              <span>{category}</span>
+              <span>{mailbox}</span>
 
               <span className="bg-white/10 px-2 py-1 rounded-lg text-sm">
-                {getCount(category)}
+                {getMailboxCount(mailbox)}
               </span>
             </button>
           ))}
@@ -159,7 +155,7 @@ function App() {
 
         <div className="flex flex-1 overflow-hidden">
           <section className="w-96 border-r border-zinc-800 p-6 overflow-y-auto">
-            <h2 className="text-xl font-semibold mb-6">{selectedCategory}</h2>
+            <h2 className="text-xl font-semibold mb-6">{selectedMailbox}</h2>
 
             <div className="space-y-4">
               {filteredEmails.length > 0 ? (
@@ -174,21 +170,7 @@ function App() {
                     }`}
                   >
                     <div className="flex justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        {email.unread && email.category !== "Sent" && (
-                          <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-                        )}
-
-                        <h3
-                          className={
-                            email.unread && email.category !== "Sent"
-                              ? "font-bold"
-                              : "font-medium"
-                          }
-                        >
-                          {email.sender}
-                        </h3>
-                      </div>
+                      <h3 className="font-bold">{email.sender}</h3>
 
                       <span className="text-sm text-zinc-400">
                         {email.time}
@@ -196,6 +178,7 @@ function App() {
                     </div>
 
                     <p className="font-medium mb-1">{email.subject}</p>
+
                     <p className="text-sm text-zinc-400">{email.preview}</p>
 
                     <div className="flex gap-2 mt-4">
@@ -226,7 +209,7 @@ function App() {
                       </h2>
 
                       <p className="text-zinc-400">
-                        {selectedEmail.category === "Sent"
+                        {getMailbox(selectedEmail) === "Sent"
                           ? `To: ${selectedEmail.sender}`
                           : `From: ${selectedEmail.sender}`}
                       </p>
@@ -238,46 +221,37 @@ function App() {
                       </span>
 
                       <span className="text-xs bg-red-600/20 text-red-400 px-3 py-2 rounded-lg">
-                        {selectedEmail.priority} Priority
+                        {selectedEmail.priority}
                       </span>
                     </div>
                   </div>
 
                   <div className="space-y-6 text-zinc-300 leading-relaxed">
                     <p>
-                      {selectedEmail.category === "Sent"
+                      {getMailbox(selectedEmail) === "Sent"
                         ? "Sent message:"
                         : "Hello Aya,"}
                     </p>
 
                     <p>{selectedEmail.preview}</p>
 
-                    <button
-                      onClick={analyzeEmail}
-                      disabled={loading}
-                      className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 transition px-5 py-3 rounded-xl font-medium"
-                    >
-                      {loading ? "Analyzing..." : "Analyze with AI"}
-                    </button>
+                    <div className="bg-zinc-800 border border-zinc-700 rounded-2xl p-5 space-y-4">
+                      <div>
+                        <h3 className="text-blue-400 font-semibold mb-2">
+                          AI Summary
+                        </h3>
 
-                    {(selectedEmail.aiSummary ||
-                      selectedEmail.suggestedReply) && (
-                      <div className="bg-zinc-800 border border-zinc-700 rounded-2xl p-5 space-y-4">
-                        <div>
-                          <h3 className="text-blue-400 font-semibold mb-2">
-                            AI Summary
-                          </h3>
-                          <p>{selectedEmail.aiSummary}</p>
-                        </div>
-
-                        <div>
-                          <h3 className="text-blue-400 font-semibold mb-2">
-                            Suggested Reply
-                          </h3>
-                          <p>{selectedEmail.suggestedReply}</p>
-                        </div>
+                        <p>{selectedEmail.ai_summary}</p>
                       </div>
-                    )}
+
+                      <div>
+                        <h3 className="text-blue-400 font-semibold mb-2">
+                          Suggested Reply
+                        </h3>
+
+                        <p>{selectedEmail.suggested_reply}</p>
+                      </div>
+                    </div>
                   </div>
                 </>
               ) : (
@@ -310,9 +284,12 @@ function App() {
                 placeholder="Recipient"
                 value={newEmail.sender}
                 onChange={(e) =>
-                  setNewEmail({ ...newEmail, sender: e.target.value })
+                  setNewEmail({
+                    ...newEmail,
+                    sender: e.target.value,
+                  })
                 }
-                className="w-full bg-zinc-800 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full bg-zinc-800 rounded-xl px-4 py-3 outline-none"
               />
 
               <input
@@ -320,53 +297,28 @@ function App() {
                 placeholder="Subject"
                 value={newEmail.subject}
                 onChange={(e) =>
-                  setNewEmail({ ...newEmail, subject: e.target.value })
+                  setNewEmail({
+                    ...newEmail,
+                    subject: e.target.value,
+                  })
                 }
-                className="w-full bg-zinc-800 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full bg-zinc-800 rounded-xl px-4 py-3 outline-none"
               />
 
               <textarea
                 placeholder="Message..."
                 value={newEmail.preview}
                 onChange={(e) =>
-                  setNewEmail({ ...newEmail, preview: e.target.value })
+                  setNewEmail({
+                    ...newEmail,
+                    preview: e.target.value,
+                  })
                 }
-                className="w-full h-40 bg-zinc-800 rounded-xl px-4 py-3 outline-none resize-none focus:ring-2 focus:ring-blue-500"
+                className="w-full h-40 bg-zinc-800 rounded-xl px-4 py-3 outline-none resize-none"
               />
 
               <button
-                onClick={() => {
-                  if (
-                    !newEmail.sender.trim() ||
-                    !newEmail.subject.trim() ||
-                    !newEmail.preview.trim()
-                  ) {
-                    return
-                  }
-
-                  const emailToAdd: Email = {
-                    id: Date.now(),
-                    sender: newEmail.sender,
-                    subject: newEmail.subject,
-                    preview: newEmail.preview,
-                    time: "Now",
-                    category: "Sent",
-                    priority: "Low",
-                    unread: false,
-                    aiSummary: "",
-                    suggestedReply: "",
-                  }
-
-                  setAllEmails([emailToAdd, ...allEmails])
-                  setSelectedCategory("Sent")
-                  setSelectedEmail(emailToAdd)
-                  setShowCompose(false)
-                  setNewEmail({
-                    sender: "",
-                    subject: "",
-                    preview: "",
-                  })
-                }}
+                onClick={sendEmail}
                 className="bg-blue-600 hover:bg-blue-500 transition px-6 py-3 rounded-xl font-medium"
               >
                 Send Email
